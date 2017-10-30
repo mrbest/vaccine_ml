@@ -1,0 +1,83 @@
+---
+title: "Vaccine_ML"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+##subset to HHS psc 6505 
+hhs_6505 <- raw_df %>% filter(product_or_service_code == "6505") %>% 
+  filter(funding_department_name == "HEALTH AND HUMAN SERVICES, DEPARTMENT OF") %>%
+  collect()
+##add the vaccine indicator
+labeled_hhs_6505 <- hhs_6505 %>% 
+  mutate(vaccine = ifelse(grepl("VACCINE", description_of_requirement)==TRUE, 1, 0 ) )
+##select reasonable set of evaluation variables and drop incomplete cases
+selected_labeled_hhs_6505 <- labeled_hhs_6505 %>% select(date_signed, vendor_name, funding_agency_name, contracting_agency_name, product_or_service_description, naics_description, vaccine ) %>% na.omit()
+##convert desired columns to factors
+selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(vendor_name = as.factor(vendor_name))
+selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(funding_agency_name = as.factor(funding_agency_name))
+selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(contracting_agency_name = as.factor(contracting_agency_name))
+selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(product_or_service_description = as.factor(product_or_service_description))
+selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(naics_description = as.factor(naics_description))
+selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(vaccine = as.factor(vaccine))
+```
+
+
+```{r}
+source("sprklyRSpark.R")
+source("opt_addressability.R")
+sc <- sparkInit()
+load_spark_parquet("../../GWCM_Extracts/FY13_17_complete.prq/")
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r }
+#subset to psc 6505
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r }
+fy16_hhs_pharma_collected <- fy16testing_transactions %>% filter(product_or_service_code == "6505") %>% 
+  filter(funding_department_name == "HEALTH AND HUMAN SERVICES, DEPARTMENT OF") %>%
+  collect()
+
+fy16_hhs_vaccines_marked <- fy16_hhs_pharma_collected %>% 
+  mutate(vaccine = ifelse(grepl("VACCINE", description_of_requirement)==TRUE, 1, 0 ) )
+
+fy16_hhs_vaccine_per_bureau <- fy16_hhs_vaccines_marked %>% filter(vaccine == 1) %>% 
+  group_by(funding_agency_name, business_rule_tier, vendor_name) %>% 
+  summarise(vaccine_obligations = sum(dollars_obligated))
+  
+fy16_hhs_pharma_bureau <- fy16_hhs_pharma_collected %>% 
+  group_by(funding_agency_name, business_rule_tier) %>% 
+   summarise(bureau_obligations = sum(dollars_obligated))
+
+
+```
+
+
+```{r}
+boruta.train <- Boruta(vaccine ~ vendor_name + funding_agency_name + contracting_agency_name + product_or_service_description + naics_description, data = selected_labeled_hhs_6505, doTrace = 2)
+plot(boruta.train, xlab = "", xaxt = "n")
+ lz<-lapply(1:ncol(boruta.train$ImpHistory),function(i)
+boruta.train$ImpHistory[is.finite(boruta.train$ImpHistory[,i]),i])
+ names(lz) <- colnames(boruta.train$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+at = 1:ncol(boruta.train$ImpHistory), cex.axis = 0.7)
+```
