@@ -13,7 +13,17 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r}
+
+
+
+```{r data_load}
+source("sprklyRSpark.R")
+source("opt_addressability.R")
+sc <- sparkInit()
+load_spark_parquet("../../GWCM_Extracts/FY13_17_complete.prq/")
+```
+
+```{r training_data_prep}
 ##subset to HHS psc 6505 
 hhs_6505 <- raw_df %>% filter(product_or_service_code == "6505") %>% 
   filter(funding_department_name == "HEALTH AND HUMAN SERVICES, DEPARTMENT OF") %>%
@@ -33,45 +43,18 @@ selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(vaccine = as.f
 ```
 
 
-```{r}
-source("sprklyRSpark.R")
-source("opt_addressability.R")
-sc <- sparkInit()
-load_spark_parquet("../../GWCM_Extracts/FY13_17_complete.prq/")
-```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r }
-#subset to psc 6505
-
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-
-```{r }
-fy16_hhs_pharma_collected <- fy16testing_transactions %>% filter(product_or_service_code == "6505") %>% 
-  filter(funding_department_name == "HEALTH AND HUMAN SERVICES, DEPARTMENT OF") %>%
-  collect()
-
-fy16_hhs_vaccines_marked <- fy16_hhs_pharma_collected %>% 
-  mutate(vaccine = ifelse(grepl("VACCINE", description_of_requirement)==TRUE, 1, 0 ) )
-
-fy16_hhs_vaccine_per_bureau <- fy16_hhs_vaccines_marked %>% filter(vaccine == 1) %>% 
-  group_by(funding_agency_name, business_rule_tier, vendor_name) %>% 
-  summarise(vaccine_obligations = sum(dollars_obligated))
-  
-fy16_hhs_pharma_bureau <- fy16_hhs_pharma_collected %>% 
-  group_by(funding_agency_name, business_rule_tier) %>% 
-   summarise(bureau_obligations = sum(dollars_obligated))
-
-
+```{r test_data_prep}
+fy13Test <- selected_labeled_hhs_6505 %>% filter(as.Date(date_signed) >= as.Date("2012-10-01") & as.Date(date_signed) <= as.Date("2013-09-30"))
+fy14Test <- selected_labeled_hhs_6505 %>% filter(as.Date(date_signed) >= as.Date("2013-10-01") & as.Date(date_signed) <= as.Date("2014-09-30"))
+fy15Test <- selected_labeled_hhs_6505 %>% filter(as.Date(date_signed) >= as.Date("2014-10-01") & as.Date(date_signed) <= as.Date("2015-09-30"))
+fy16Test <- selected_labeled_hhs_6505 %>% filter(as.Date(date_signed) >= as.Date("2015-10-01") & as.Date(date_signed) <= as.Date("2016-09-30"))
+fy17Test <- selected_labeled_hhs_6505 %>% filter(as.Date(date_signed) >= as.Date("2016-10-01") & as.Date(date_signed) <= as.Date("2017-09-30"))
 ```
 
 
-```{r}
+```{r verify_features}
+library(Boruta)
 boruta.train <- Boruta(vaccine ~ vendor_name + funding_agency_name + contracting_agency_name + product_or_service_description + naics_description, data = selected_labeled_hhs_6505, doTrace = 2)
 plot(boruta.train, xlab = "", xaxt = "n")
  lz<-lapply(1:ncol(boruta.train$ImpHistory),function(i)
@@ -80,4 +63,11 @@ boruta.train$ImpHistory[is.finite(boruta.train$ImpHistory[,i]),i])
 Labels <- sort(sapply(lz,median))
 axis(side = 1,las=2,labels = names(Labels),
 at = 1:ncol(boruta.train$ImpHistory), cex.axis = 0.7)
+```
+
+
+```{r svm_model_predict}
+library(e1071)
+model <- svm(vaccine ~ vendor_name + funding_agency_name + contracting_agency_name + naics_description, data = selected_labeled_hhs_6505)
+pred <- predict(model, data = selected_labeled_hhs_6505)
 ```
