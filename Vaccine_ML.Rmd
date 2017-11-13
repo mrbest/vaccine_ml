@@ -32,7 +32,7 @@ hhs_6505 <- raw_df %>% filter(product_or_service_code == "6505") %>%
 labeled_hhs_6505 <- hhs_6505 %>% 
   mutate(vaccine = ifelse(grepl("VACCINE", description_of_requirement)==TRUE, 1, 0 ) )
 ##select reasonable set of evaluation variables and drop incomplete cases
-selected_labeled_hhs_6505 <- labeled_hhs_6505 %>% select(date_signed, vendor_name, funding_agency_name, contracting_agency_name, product_or_service_description, naics_description, vaccine ) %>% na.omit()
+selected_labeled_hhs_6505 <- labeled_hhs_6505 %>% select(date_signed, vendor_name, funding_agency_name, contracting_agency_name, product_or_service_description, naics_description, vaccine, description_of_requirement ) %>% na.omit()
 ##convert desired columns to factors
 selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(vendor_name = as.factor(vendor_name))
 selected_labeled_hhs_6505 <- selected_labeled_hhs_6505 %>% mutate(funding_agency_name = as.factor(funding_agency_name))
@@ -67,7 +67,24 @@ at = 1:ncol(boruta.train$ImpHistory), cex.axis = 0.7)
 
 
 ```{r svm_model_predict}
-library(e1071)
-model <- svm(vaccine ~ vendor_name + funding_agency_name + contracting_agency_name + naics_description, data = selected_labeled_hhs_6505)
-pred <- predict(model, data = selected_labeled_hhs_6505)
-```
+library(kernlab)
+myColumns = c("vendor_name","funding_agency_name","contracting_agency_name","naics_description","vaccine") # x and y
+labels = myData$vaccine # y you're trying to predict
+myData <-selected_labeled_hhs_6505[,myColumns] 
+numFolds <- 10 # number of folds means number of segments in the dataframe row-wise
+folds <- cut(seq(1,nrow(myData)),breaks=numFolds,labels=FALSE) # cuts data into numFolds folds
+predictions = rep(-1,nrow(myData)) # make a dummy vector to hold predictions
+for(i in 1:numFolds) {
+   print(paste(">>>>>>>>>>>>>>>>>>>>>>> fold",i))
+   testIndices = which(folds ==i, arr.ind=TRUE) # fold i is test k-1 other folds are train
+   svm.train = myData[-testIndices,] # ! test = train
+   svm.test = myData[testIndices,]
+   svm.test = svm.test[,-which(colnames(myData)=="vaccine")]
+   model <- ksvm(vaccine ~ vendor_name + funding_agency_name + contracting_agency_name + naics_description, data = svm.train, kernel = "vanilladot",prob.model=TRUE)
+   predictions[testIndices] = predict(model, svm.test, type="probabilities")[,2]
+}
+pred.labels = round(predictions)
+cont.table = table(pred, svm.loo.test$vaccine)
+print(paste("accuracy",sum(diag(cont.table))/sum(cont.table)))
+svm.results = compute_perf(predictions,labels,".",FALSE)
+      
